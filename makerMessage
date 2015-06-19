@@ -1,0 +1,78 @@
+#!/usr/bin/env groovy
+import java.net.*;
+import java.nio.file.*;
+import groovy.json.*;
+
+private ConfigObject readConfig(){
+  String home = System.getProperty("user.home");
+  File configFile = FileSystems.getDefault().getPath(home, ".makerMessage").toFile();
+  if(!configFile.canRead()){
+    return null;
+  }
+  URL configPath = configFile.toURI().toURL();
+  ConfigSlurper configReader = new ConfigSlurper();
+  ConfigObject config = configReader.parse(configPath);
+  return config;
+}
+
+private CliBuilder buildCommandParser(){
+  def cli = new CliBuilder(usage : "makerMessage [event]");
+  cli.with {
+    _ longOpt: 'help', 'Show usage information';
+    _ longOpt: 'value1', args:1, 'The value for ifttt\'s value1 parameter';
+    _ longOpt: 'value2', args:1, 'The value for ifttt\'s value2 parameter';
+    _ longOpt: 'value3', args:1, 'The value for ifttt\'s value3 parameter';
+  };
+  return cli;
+}
+
+private String makeRequestPayload(Object options){
+  def values = [:];
+  if(options['value1']){
+    values['value1'] = options['value1'];
+  }
+  if(options['value2']){
+    values['value2'] = options['value2'];
+  }
+  if(options['value3']){
+    values['value3'] = options['value3'];
+  }
+  return JsonOutput.toJson(values);
+}
+
+CliBuilder cli = buildCommandParser();
+def options = cli.parse(args);
+
+if(options.help){
+  cli.usage();
+  return;
+}
+
+ConfigObject config = readConfig();
+if(config == null){
+  println "Can't read config file.  It's required to store your Maker channel secret";
+  System.exit(1);
+}
+String secret = config['ifttt']['secret'];
+
+List<String> extraArgs = options.arguments();
+if(extraArgs?.size() <= 0){
+  println "An event name is required";
+  System.exit(1);
+}
+
+String event = extraArgs[0];
+String body = makeRequestPayload(options);
+HttpURLConnection connection = "https://maker.ifttt.com/trigger/${event}/with/key/${secret}".toURL().openConnection();
+connection.setRequestMethod("POST");
+connection.setRequestProperty("Content-Type", "application/json");
+connection.setDoOutput(true);
+connection.getOutputStream().withWriter { Writer writer ->
+  writer << body;
+};
+
+int responseCode = connection.getResponseCode();
+
+if((responseCode < 200) || (responseCode >= 300)){
+  System.exit(responseCode);
+}
